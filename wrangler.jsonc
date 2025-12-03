@@ -1,0 +1,37 @@
+{
+  "name": "superttt",
+  "main": "src/index.js",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Static asset serving (replaces Cloudflare Pages)
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  // Durable Objects for WebSocket coordination
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GAME_SESSIONS",
+        "class_name": "GameSession",
+        "script_name": "superttt"
+      }
+    ]
+  },
+
+  // D1 for ALL persistent data
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "superttt-db",
+      "database_id": "34b0fd4f-1eeb-4f34-b00f-1eb033223d03"
+    }
+  ],
+
+  "vars": {
+    "ENVIRONMENT": "production"
+  }
+}

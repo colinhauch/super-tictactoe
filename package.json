@@ -1,0 +1,27 @@
+{
+  "name": "superttt",
+  "version": "1.0.0",
+  "description": "Super Tic-Tac-Toe on Cloudflare Workers",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:inspector": "wrangler dev --inspector",
+    "deploy": "npm run build && wrangler deploy",
+    "build": "mkdir -p dist && cp -r frontend/* dist/",
+    "db:create": "wrangler d1 create superttt-db",
+    "db:migrate:local": "wrangler d1 migrations apply superttt-db --local",
+    "db:migrate:prod": "wrangler d1 migrations apply superttt-db",
+    "db:query:local": "wrangler d1 execute superttt-db --local --command",
+    "db:query:prod": "wrangler d1 execute superttt-db --command",
+    "db:inspect": "./scripts/inspect-db.sh",
+    "db:reset": "rm -rf .wrangler/state && npm run db:migrate:local",
+    "logs": "wrangler tail",
+    "logs:search": "wrangler tail --format=pretty --search"
+  },
+  "devDependencies": {
+    "wrangler": "^4.52.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
