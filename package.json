@@ -4,10 +4,13 @@
   "description": "Super Tic-Tac-Toe on Cloudflare Workers",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "dev:inspector": "wrangler dev --inspector",
-    "deploy": "npm run build && wrangler deploy",
-    "build": "mkdir -p dist && cp -r frontend/* dist/",
+    "dev": "npm run types && npm run build:frontend && wrangler dev",
+    "dev:inspector": "npm run types && npm run build:frontend && wrangler dev --inspector",
+    "deploy": "npm run typecheck && npm run build && wrangler deploy",
+    "build": "npm run types && npm run build:frontend",
+    "build:frontend": "esbuild frontend/app.ts --bundle --outfile=dist/app.js --target=es2021 --format=esm --platform=browser && cp frontend/index.html frontend/styles.css dist/",
+    "typecheck": "tsc --noEmit && tsc --project frontend/tsconfig.json --noEmit",
+    "types": "wrangler types",
     "db:create": "wrangler d1 create superttt-db",
     "db:migrate:local": "wrangler d1 migrations apply superttt-db --local",
     "db:migrate:prod": "wrangler d1 migrations apply superttt-db",
@@ -19,7 +22,11 @@
     "logs:search": "wrangler tail --format=pretty --search"
   },
   "devDependencies": {
-    "wrangler": "^4.52.1"
+    "@cloudflare/workers-types": "^4.20251202.0",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.52.1",
+    "zod": "^3.25.76"
   },
   "engines": {
     "node": ">=16.0.0"
