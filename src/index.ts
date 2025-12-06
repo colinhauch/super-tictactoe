@@ -162,54 +162,18 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
         return Response.json({ error: 'You cannot join your own game' }, { status: 400 });
       }
 
-      // Random X/O assignment
-      const joinedPlayerBecomesX = Math.random() < 0.5;
-
-      let finalXIdentity: string;
-      let finalOIdentity: string;
-      let assignedRole: 'X' | 'O';
-
-      if (joinedPlayerBecomesX) {
-        // Joiner becomes X, creator becomes O
-        finalXIdentity = body.player_identity;
-        finalOIdentity = game.X_identity;
-        assignedRole = 'X';
-      } else {
-        // Keep creator as X, joiner becomes O
-        finalXIdentity = game.X_identity;
-        finalOIdentity = body.player_identity;
-        assignedRole = 'O';
-      }
-
-      // Update game to active status
-      await env.DB.prepare(`
-        UPDATE games
-        SET X_identity = ?, O_identity = ?, status = 'active', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'waiting'
-      `).bind(finalXIdentity, finalOIdentity, gameId).run();
-
-      // Broadcast to all WebSocket connections that a player joined
-      // This notifies player 1 that player 2 has joined
-      try {
-        const doId = env.GAME_SESSIONS.idFromName(gameId);
-        const doStub = env.GAME_SESSIONS.get(doId);
-        // Trigger a broadcast by fetching the Durable Object with game ID in path
-        await doStub.fetch(new Request(`https://internal/api/games/${gameId}/broadcast-join`));
-      } catch (error) {
-        console.error('[API] Failed to trigger WebSocket broadcast:', error);
-        // Don't fail the join request if broadcast fails
-      }
-
+      // MVP: DO will assign roles by connection order (first = X, second = O)
+      // Just return success - the DO will handle role assignment when player connects
       const response: JoinGameResponse = {
         success: true,
-        role: assignedRole,
+        role: 'O', // Player 2 will always be O in MVP
         game: {
           id: game.id,
-          status: 'active',
+          status: 'waiting', // Still waiting until both connect to DO
           nextToMove: game.nextToMove,
           moves: JSON.parse(game.moves),
-          X_identity: finalXIdentity,
-          O_identity: finalOIdentity,
+          X_identity: game.X_identity,
+          O_identity: null, // DO will set this
           source: game.source
         }
       };

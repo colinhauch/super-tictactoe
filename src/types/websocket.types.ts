@@ -36,9 +36,27 @@ export interface ErrorMessage {
 }
 
 /**
+ * Server -> Client: Game started with both players
+ */
+export interface GameStartedMessage {
+  type: 'game_started';
+  moveDeadline: number;
+}
+
+/**
+ * Server -> Client: Game ended
+ */
+export interface GameEndedMessage {
+  type: 'game_ended';
+  winner?: 'X' | 'O';
+  reason: string;
+  message: string;
+}
+
+/**
  * All possible WebSocket message types
  */
-export type WSMessage = MoveMessage | StateMessage | ErrorMessage;
+export type WSMessage = MoveMessage | StateMessage | ErrorMessage | GameStartedMessage | GameEndedMessage;
 
 /**
  * Zod schema for move messages with runtime validation
@@ -83,9 +101,33 @@ export const errorMessageSchema = z.object({
 });
 
 /**
+ * Zod schema for game started messages with runtime validation
+ */
+export const gameStartedMessageSchema = z.object({
+  type: z.literal('game_started'),
+  moveDeadline: z.number()
+});
+
+/**
+ * Zod schema for game ended messages with runtime validation
+ */
+export const gameEndedMessageSchema = z.object({
+  type: z.literal('game_ended'),
+  winner: z.enum(['X', 'O']).optional(),
+  reason: z.string(),
+  message: z.string()
+});
+
+/**
  * Union schema for all WebSocket message types with runtime validation
  */
-export const wsMessageSchema = z.union([moveMessageSchema, stateMessageSchema, errorMessageSchema]);
+export const wsMessageSchema = z.union([
+  moveMessageSchema,
+  stateMessageSchema,
+  errorMessageSchema,
+  gameStartedMessageSchema,
+  gameEndedMessageSchema
+]);
 
 /**
  * Type guard for move messages
