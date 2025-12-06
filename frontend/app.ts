@@ -388,6 +388,19 @@ class SuperTicTacToe {
           console.error('[WS] Server error:', data.message);
           // Don't reconnect on game logic errors
           this.updateStatus(`Error: ${data.message}`);
+        } else if (data.type === 'game_started') {
+          console.log('[WS] Game started! Move deadline:', new Date(data.moveDeadline));
+          this.updateStatus('Game started! Both players connected.');
+        } else if (data.type === 'game_ended') {
+          console.log('[WS] Game ended:', data.reason, data.message);
+          this.updateStatus(`Game ended: ${data.message}`);
+          if (data.winner) {
+            // Show winner notification
+            alert(`Game Over! Winner: ${data.winner}\nReason: ${data.message}`);
+          } else {
+            // Game abandoned
+            alert(`Game ended: ${data.message}`);
+          }
         }
       } catch (error) {
         console.error('[WS] Failed to parse message:', error);
@@ -438,6 +451,15 @@ class SuperTicTacToe {
   }
 
   private handleStateUpdate(game: Game): void {
+    console.log('[App] State update received:', {
+      status: game.status,
+      nextToMove: game.nextToMove,
+      movesCount: game.moves.length,
+      X_identity: game.X_identity,
+      O_identity: game.O_identity,
+      myPlayerId: this.playerId
+    });
+
     this.currentState = game;
     this.renderBoard(game.moves);
     this.updateGameInfo(game);
@@ -448,7 +470,30 @@ class SuperTicTacToe {
         `Game Over: ${game.status === 'draw' ? 'Draw!' : game.status + ' wins!'}`
       );
     } else {
-      this.updateStatus(`Turn: ${game.nextToMove}`);
+      // Determine which player this user is
+      let myRole: 'X' | 'O' | 'Spectator' = 'Spectator';
+      if (this.playerId === game.X_identity) {
+        myRole = 'X';
+      } else if (this.playerId === game.O_identity) {
+        myRole = 'O';
+      }
+
+      if (game.status === 'waiting') {
+        if (myRole === 'X') {
+          this.updateStatus('⏳ You are Player X - Waiting for opponent to join...');
+        } else if (myRole === 'O') {
+          this.updateStatus('⏳ You are Player O - Waiting for opponent...');
+        } else {
+          this.updateStatus('⏳ Waiting for players...');
+        }
+      } else {
+        const isMyTurn = game.nextToMove === myRole;
+        if (isMyTurn) {
+          this.updateStatus(`🎯 You are ${myRole} - YOUR TURN!`);
+        } else {
+          this.updateStatus(`⏸️ You are ${myRole} - Waiting for ${game.nextToMove} to move...`);
+        }
+      }
     }
   }
 
@@ -576,14 +621,36 @@ class SuperTicTacToe {
   }
 
   private handleCellClick(board: BoardIndex, cell: CellIndex): void {
+    console.log('[App] Cell clicked:', { board, cell });
+
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.updateStatus('Not connected');
       return;
     }
 
-    const isPlayable = this.currentState && (this.currentState.status === 'incomplete' || this.currentState.status === 'active');
+    if (!this.currentState) {
+      console.log('[App] No current state');
+      return;
+    }
+
+    const isPlayable = this.currentState.status === 'incomplete' || this.currentState.status === 'active';
     if (!isPlayable) {
+      console.log('[App] Game not playable, status:', this.currentState.status);
       this.updateStatus('Game is over');
+      return;
+    }
+
+    // Check if it's this player's turn
+    let myRole: 'X' | 'O' | null = null;
+    if (this.playerId === this.currentState.X_identity) {
+      myRole = 'X';
+    } else if (this.playerId === this.currentState.O_identity) {
+      myRole = 'O';
+    }
+
+    if (myRole !== this.currentState.nextToMove) {
+      console.log('[App] Not your turn. You are:', myRole, 'Next to move:', this.currentState.nextToMove);
+      this.updateStatus(`Not your turn! Wait for ${this.currentState.nextToMove} to play.`);
       return;
     }
 
@@ -592,9 +659,11 @@ class SuperTicTacToe {
 
     // Validate move client-side before sending
     if (!isLegalMove(state, board, cell)) {
-      console.log('Illegal move attempted:', { board, cell, state });
+      console.log('[App] Illegal move attempted:', { board, cell, state });
       return; // Silently ignore illegal moves
     }
+
+    console.log('[App] Sending move to server:', { board, cell });
 
     // Send move to server
     const moveMsg: MoveMessage = {
@@ -611,7 +680,19 @@ class SuperTicTacToe {
     const gameStatusEl = document.getElementById('game-status');
 
     if (gameIdEl) gameIdEl.textContent = game.id;
-    if (nextPlayerEl) nextPlayerEl.textContent = game.nextToMove;
+    if (nextPlayerEl) {
+      // Determine which player this user is
+      let myRole: 'X' | 'O' | 'Spectator' = 'Spectator';
+      if (this.playerId === game.X_identity) {
+        myRole = 'X';
+      } else if (this.playerId === game.O_identity) {
+        myRole = 'O';
+      }
+
+      // Show "Next to move: X (YOU)" or "Next to move: O"
+      const youIndicator = myRole === game.nextToMove ? ' (YOU)' : '';
+      nextPlayerEl.textContent = `${game.nextToMove}${youIndicator} | You are: ${myRole}`;
+    }
     if (gameStatusEl) gameStatusEl.textContent = game.status;
   }
 
