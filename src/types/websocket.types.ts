@@ -56,11 +56,11 @@ export const stateMessageSchema = z.object({
   type: z.literal('state'),
   game: z.object({
     id: z.string(),
-    status: z.enum(['X', 'O', 'draw', 'incomplete']),
+    status: z.enum(['X', 'O', 'draw', 'incomplete', 'waiting', 'active']),
     nextToMove: z.enum(['X', 'O']),
     moves: z.array(z.number()),
     X_identity: z.string(),
-    O_identity: z.string(),
+    O_identity: z.string().nullable(),
     source: z.enum(['api', 'websocket']).optional().default('api'),
     lastMove: z
       .object({

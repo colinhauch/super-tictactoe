@@ -10,8 +10,10 @@ import type { Game, GameStatus, Player } from './game.types';
  */
 export interface CreateGameRequest {
   X_identity: string;
-  O_identity: string;
+  O_identity: string | null;  // null = waiting for human
   source?: 'api' | 'websocket';
+  gameType: 'bot' | 'human';
+  botDifficulty?: 'easy' | 'medium' | 'hard';  // required if gameType='bot'
 }
 
 /**
@@ -19,9 +21,14 @@ export interface CreateGameRequest {
  */
 export const createGameRequestSchema = z.object({
   X_identity: z.string().min(1, 'X_identity is required'),
-  O_identity: z.string().min(1, 'O_identity is required'),
-  source: z.enum(['api', 'websocket']).optional().default('api')
-});
+  O_identity: z.string().nullable(),
+  source: z.enum(['api', 'websocket']).optional().default('api'),
+  gameType: z.enum(['bot', 'human']),
+  botDifficulty: z.enum(['easy', 'medium', 'hard']).optional()
+}).refine(
+  (data) => data.gameType !== 'bot' || data.botDifficulty !== undefined,
+  { message: 'botDifficulty is required when gameType is bot', path: ['botDifficulty'] }
+);
 
 /**
  * POST /api/games - Create game response
@@ -60,6 +67,33 @@ export interface SubmitMoveResponse {
     board: number;
     cell: number;
   }>;
+  botMove?: {
+    board: number;
+    cell: number;
+  };
+}
+
+/**
+ * POST /api/games/:id/join - Join game request
+ */
+export interface JoinGameRequest {
+  player_identity: string;
+}
+
+/**
+ * Zod schema for join game requests with runtime validation
+ */
+export const joinGameRequestSchema = z.object({
+  player_identity: z.string().min(1, 'player_identity is required')
+});
+
+/**
+ * POST /api/games/:id/join - Join game response
+ */
+export interface JoinGameResponse {
+  success: boolean;
+  role: 'X' | 'O';
+  game: Game;
 }
 
 /**

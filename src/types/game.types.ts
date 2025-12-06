@@ -10,7 +10,7 @@ export type Player = 'X' | 'O';
 /**
  * Game outcome status
  */
-export type GameStatus = 'X' | 'O' | 'draw' | 'incomplete';
+export type GameStatus = 'X' | 'O' | 'draw' | 'incomplete' | 'waiting' | 'active';
 
 /**
  * Source of game creation
@@ -70,10 +70,12 @@ export interface GameRecord {
   nextToMove: Player;
   moves: string;  // JSON-serialized array
   X_identity: string;
-  O_identity: string;
+  O_identity: string | null;  // null for waiting games
   source: GameSource;
   created_at: string;
   updated_at: string;
+  end_reason?: string;
+  ended_at?: string;
 }
 
 /**
@@ -85,7 +87,7 @@ export interface Game {
   nextToMove: Player;
   moves: number[];  // Flat array: [board, cell, board, cell, ...]
   X_identity: string;
-  O_identity: string;
+  O_identity: string | null;  // null for waiting games
   source: GameSource;
   lastMove?: {
     board: BoardIndex;
