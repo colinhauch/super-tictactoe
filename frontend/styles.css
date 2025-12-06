@@ -40,6 +40,25 @@ h1 {
   font-weight: 600;
 }
 
+.connection-status {
+  font-size: 0.9rem;
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+.connection-status.connected {
+  color: #4ade80;
+}
+
+.connection-status.connecting {
+  color: #fbbf24;
+}
+
+.connection-status.disconnected,
+.connection-status.error {
+  color: #f87171;
+}
+
 main {
   display: flex;
   gap: 30px;
@@ -190,6 +209,334 @@ main {
   color: #667eea;
 }
 
+.game-id-display {
+  display: block;
+  word-break: break-all;
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  margin-top: 4px;
+}
+
+.icon-btn {
+  padding: 4px 8px;
+  background: none;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s;
+  margin-left: 4px;
+}
+
+.icon-btn:hover {
+  background: #f0f0f0;
+  border-color: #667eea;
+}
+
+.share-btn {
+  width: 100%;
+  padding: 10px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 12px;
+  transition: background 0.2s;
+}
+
+.share-btn:hover {
+  background: #45a049;
+}
+
+/* Join Game Section */
+.join-game-section {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.join-game-section label {
+  display: block;
+  margin-bottom: 8px;
+  color: #666;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.join-game-controls {
+  display: flex;
+  gap: 8px;
+}
+
+#join-game-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+}
+
+#join-game-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+#join-game-input::placeholder {
+  color: #999;
+}
+
+.btn-join {
+  padding: 8px 16px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.btn-join:hover {
+  background: #5568d3;
+}
+
+.btn-join:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+/* Modal styles */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 16px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: #333;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  cursor: pointer;
+  color: #999;
+  line-height: 1;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  transition: color 0.2s;
+}
+
+.modal-close:hover {
+  color: #333;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+/* Game type selector */
+.game-type-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.game-type-btn {
+  background: #f8f9fa;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 20px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.game-type-btn:hover {
+  background: #e8e8ff;
+  border-color: #667eea;
+  transform: translateY(-2px);
+}
+
+.game-type-btn.selected {
+  background: #e8e8ff;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.game-type-btn h3 {
+  margin: 8px 0 4px 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.game-type-btn p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.game-type-icon {
+  font-size: 3rem;
+  margin-bottom: 8px;
+}
+
+/* Difficulty selector */
+.difficulty-selector {
+  margin-bottom: 20px;
+}
+
+.difficulty-selector.hidden {
+  display: none;
+}
+
+.difficulty-selector h3 {
+  margin: 0 0 12px 0;
+  color: #333;
+  font-size: 1rem;
+}
+
+.difficulty-options {
+  display: flex;
+  gap: 12px;
+}
+
+.difficulty-btn {
+  flex: 1;
+  background: #f8f9fa;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.difficulty-btn:hover {
+  background: #e8e8ff;
+  border-color: #667eea;
+}
+
+.difficulty-btn.selected {
+  background: #e8e8ff;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.difficulty-btn span {
+  font-weight: 600;
+  color: #333;
+}
+
+.difficulty-btn small {
+  color: #666;
+  font-size: 0.85rem;
+}
+
+/* Modal actions */
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.btn-primary {
+  flex: 1;
+  padding: 12px 24px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 1rem;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.btn-primary:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-secondary {
+  padding: 12px 24px;
+  background: #f8f9fa;
+  color: #333;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 1rem;
+}
+
+.btn-secondary:hover {
+  background: #e8e9ea;
+  border-color: #ccc;
+}
+
 @media (max-width: 768px) {
   main {
     flex-direction: column;
@@ -201,5 +548,19 @@ main {
 
   .cell {
     font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .game-type-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .difficulty-options {
+    flex-direction: column;
+  }
+
+  .modal-content {
+    width: 95%;
   }
 }
