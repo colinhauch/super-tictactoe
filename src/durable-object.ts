@@ -1,11 +1,12 @@
 import { DurableObject } from 'cloudflare:workers';
 import { getStateFromHistory, isLegalMove, checkGameWin } from './game-logic';
+import { botEasy, botMedium, botHard } from './bots';
 import type { GameRecord, BoardIndex, CellIndex } from './types/game.types';
 import { moveMessageSchema, stateMessageSchema, type StateMessage, type ErrorMessage } from './types/websocket.types';
 import { z } from 'zod';
 
 export class GameSession extends DurableObject {
-  private connections: WebSocket[] = [];
+  private connections: Map<WebSocket, string> = new Map(); // Map WebSocket to player identity
   private gameId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -14,16 +15,26 @@ export class GameSession extends DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
-    // Extract game ID from URL
-    // Pattern: /api/games/:gameId/ws
+    // Extract game ID and player identity from URL
+    // Pattern: /api/games/:gameId/ws?identity=<playerId>
     const url = new URL(request.url);
     const pathParts = url.pathname.split('/').filter(Boolean);
     // pathParts = ['api', 'games', '<gameId>', 'ws']
     this.gameId = pathParts[2] || null;
+    const playerIdentity = url.searchParams.get('identity');
 
     console.log(`[DO] Full path: ${url.pathname}`);
     console.log(`[DO] Extracted game ID: ${this.gameId}`);
+    console.log(`[DO] Player identity: ${playerIdentity}`);
     console.log(`[DO] Upgrade header: ${request.headers.get('Upgrade')}`);
+
+    // Handle broadcast-join request from API
+    // Pattern: /api/games/:gameId/broadcast-join
+    if (url.pathname.includes('/broadcast-join')) {
+      console.log('[DO] Broadcast join request received for game:', this.gameId);
+      await this.broadcastGameState();
+      return new Response('OK', { status: 200 });
+    }
 
     // Upgrade to WebSocket
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -43,9 +54,9 @@ export class GameSession extends DurableObject {
       return new Response('Game not found', { status: 404 });
     }
 
-    // Accept WebSocket and store connection
+    // Accept WebSocket and store connection with player identity
     this.ctx.acceptWebSocket(server);
-    this.connections.push(server);
+    this.connections.set(server, playerIdentity || 'unknown');
 
     // Send initial state
     const initialMessage: StateMessage = {
@@ -94,48 +105,87 @@ export class GameSession extends DurableObject {
     ).bind(this.gameId).first<GameRecord>();
 
     if (!game) {
-      throw new Error('Game not found');
+      const errorMsg: ErrorMessage = { type: 'error', message: 'Game not found' };
+      ws.send(JSON.stringify(errorMsg));
+      return;
     }
 
-    if (game.status !== 'incomplete') {
-      throw new Error('Game is already complete');
+    if (game.status !== 'incomplete' && game.status !== 'active') {
+      const errorMsg: ErrorMessage = { type: 'error', message: 'Game is not active' };
+      ws.send(JSON.stringify(errorMsg));
+      return;
     }
 
-    // 2. Validate move
+    // 2. Validate player identity
+    const playerIdentity = this.connections.get(ws);
     const moves: number[] = JSON.parse(game.moves);
-    const state = getStateFromHistory(moves);
+    let state = getStateFromHistory(moves);
 
-    if (!isLegalMove(state, board, cell)) {
-      throw new Error('Illegal move');
+    // Determine which player should move next
+    const expectedIdentity = state.nextToMove === 'X' ? game.X_identity : game.O_identity;
+
+    if (playerIdentity !== expectedIdentity) {
+      const errorMsg: ErrorMessage = { type: 'error', message: 'Not your turn' };
+      ws.send(JSON.stringify(errorMsg));
+      return;
     }
 
-    // 3. Apply move
-    const newMoves = [...moves, board, cell];
-    const newState = getStateFromHistory(newMoves);
-    const gameResult = checkGameWin(newState);
-    const newStatus = gameResult || 'incomplete';
-    const newNextToMove = newState.nextToMove;
+    // 3. Validate move legality
+    if (!isLegalMove(state, board, cell)) {
+      const errorMsg: ErrorMessage = { type: 'error', message: 'Illegal move' };
+      ws.send(JSON.stringify(errorMsg));
+      return;
+    }
 
-    // 4. Update D1
+    // 4. Apply move
+    let finalMoves = [...moves, board, cell];
+    state = getStateFromHistory(finalMoves);
+    let gameResult = checkGameWin(state);
+
+    // 5. Check if playing against bot and it's bot's turn
+    if (!gameResult && game.O_identity?.startsWith('bot-') && state.nextToMove === 'O') {
+      const botDifficulty = game.O_identity.split('-')[1] || 'easy';
+
+      let botMove;
+      if (botDifficulty === 'hard') {
+        botMove = botHard(state);
+      } else if (botDifficulty === 'medium') {
+        botMove = botMedium(state);
+      } else {
+        botMove = botEasy(state);
+      }
+
+      if (botMove) {
+        finalMoves = [...finalMoves, botMove.board, botMove.cell];
+        state = getStateFromHistory(finalMoves);
+        gameResult = checkGameWin(state);
+      }
+    }
+
+    // Keep status as 'active' for human vs human games
+    const newStatus = gameResult || (game.status === 'active' ? 'active' : 'incomplete');
+    const newNextToMove = state.nextToMove;
+
+    // 6. Update D1
     await this.env.DB.prepare(`
       UPDATE games
       SET moves = ?, status = ?, nextToMove = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).bind(
-      JSON.stringify(newMoves),
+      JSON.stringify(finalMoves),
       newStatus,
       newNextToMove,
       this.gameId
     ).run();
 
-    // 5. Broadcast to all connections
+    // 7. Broadcast to all connections
     const updateMessage: StateMessage = {
       type: 'state',
       game: {
         id: this.gameId!,
         status: newStatus,
         nextToMove: newNextToMove,
-        moves: newMoves,
+        moves: finalMoves,
         X_identity: game.X_identity,
         O_identity: game.O_identity,
         source: game.source,
@@ -143,17 +193,56 @@ export class GameSession extends DurableObject {
       }
     };
 
-    for (const conn of this.connections) {
+    for (const [conn] of this.connections) {
       try {
         conn.send(JSON.stringify(updateMessage));
       } catch (err) {
         // Connection closed, ignore
+        console.error('[DO] Failed to send to connection:', err);
       }
     }
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
-    // Remove from connections list
-    this.connections = this.connections.filter(conn => conn !== ws);
+    // Remove from connections map
+    this.connections.delete(ws);
+    console.log(`[DO] Connection closed. Remaining: ${this.connections.size}`);
+  }
+
+  private async broadcastGameState(): Promise<void> {
+    if (!this.gameId) return;
+
+    // Load current game state from D1
+    const game = await this.env.DB.prepare(
+      'SELECT * FROM games WHERE id = ?'
+    ).bind(this.gameId).first<GameRecord>();
+
+    if (!game) {
+      console.error('[DO] Game not found for broadcast');
+      return;
+    }
+
+    // Broadcast updated state to all connections
+    const updateMessage: StateMessage = {
+      type: 'state',
+      game: {
+        id: game.id,
+        status: game.status,
+        nextToMove: game.nextToMove,
+        moves: JSON.parse(game.moves),
+        X_identity: game.X_identity,
+        O_identity: game.O_identity,
+        source: game.source
+      }
+    };
+
+    console.log(`[DO] Broadcasting to ${this.connections.size} connections`);
+    for (const [conn] of this.connections) {
+      try {
+        conn.send(JSON.stringify(updateMessage));
+      } catch (err) {
+        console.error('[DO] Failed to send broadcast:', err);
+      }
+    }
   }
 }
