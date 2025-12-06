@@ -1,8 +1,10 @@
 import { GameSession } from './durable-object';
 import { getStateFromHistory, isLegalMove, checkGameWin, getLegalMoves } from './game-logic';
+import { generateGameId } from './utils/game-id';
+import { botEasy, botMedium, botHard } from './bots';
 import type { GameRecord, BoardIndex, CellIndex } from './types/game.types';
-import type { CreateGameRequest, SubmitMoveRequest, CreateGameResponse, SubmitMoveResponse, StatsResponse } from './types/api.types';
-import { createGameRequestSchema, submitMoveRequestSchema } from './types/api.types';
+import type { CreateGameRequest, SubmitMoveRequest, CreateGameResponse, SubmitMoveResponse, StatsResponse, JoinGameResponse } from './types/api.types';
+import { createGameRequestSchema, submitMoveRequestSchema, joinGameRequestSchema } from './types/api.types';
 
 export { GameSession };
 
@@ -53,21 +55,57 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   if (path === '/api/games' && request.method === 'POST') {
     try {
       const body = createGameRequestSchema.parse(await request.json());
-      const gameId = crypto.randomUUID();
+
+      // Determine O_identity and status based on game type
+      let oIdentity: string | null;
+      let status: 'incomplete' | 'waiting';
+
+      if (body.gameType === 'bot') {
+        // Bot game
+        const difficulty = body.botDifficulty || 'easy';
+        oIdentity = `bot-${difficulty}`;
+        status = 'incomplete';
+      } else {
+        // Human game - waiting for player 2
+        oIdentity = null;
+        status = 'waiting';
+      }
+
+      // Generate game ID with collision retry (max 5 attempts)
+      let gameId: string | null = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const candidateId = generateGameId();
+        const existing = await env.DB.prepare('SELECT id FROM games WHERE id = ?')
+          .bind(candidateId)
+          .first();
+
+        if (!existing) {
+          gameId = candidateId;
+          break;
+        }
+      }
+
+      if (!gameId) {
+        return Response.json(
+          { error: 'Failed to generate unique game ID' },
+          { status: 500 }
+        );
+      }
 
       await env.DB.prepare(`
         INSERT INTO games (id, status, nextToMove, moves, X_identity, O_identity, source)
-        VALUES (?, 'incomplete', 'X', '[]', ?, ?, ?)
+        VALUES (?, ?, 'X', '[]', ?, ?, ?)
       `).bind(
         gameId,
+        status,
         body.X_identity,
-        body.O_identity,
+        oIdentity,
         body.source
       ).run();
 
       const response: CreateGameResponse = {
         id: gameId,
-        status: 'incomplete',
+        status: status,
         nextToMove: 'X',
         moves: []
       };
@@ -97,7 +135,57 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  // POST /api/games/:id/move - Submit move (HTTP fallback)
+  // POST /api/games/:id/join - Join a waiting game
+  if (path.match(/^\/api\/games\/[\w-]+\/join$/) && request.method === 'POST') {
+    try {
+      const gameId = path.split('/')[3];
+      if (!gameId) {
+        return Response.json({ error: 'Invalid game ID' }, { status: 400 });
+      }
+
+      const body = joinGameRequestSchema.parse(await request.json());
+
+      // Load game
+      const game = await env.DB.prepare('SELECT * FROM games WHERE id = ?')
+        .bind(gameId)
+        .first<GameRecord>();
+
+      if (!game) {
+        return Response.json({ error: 'Game not found' }, { status: 404 });
+      }
+
+      if (game.status !== 'waiting') {
+        return Response.json({ error: 'Game is not accepting players' }, { status: 400 });
+      }
+
+      if (game.X_identity === body.player_identity) {
+        return Response.json({ error: 'You cannot join your own game' }, { status: 400 });
+      }
+
+      // MVP: DO will assign roles by connection order (first = X, second = O)
+      // Just return success - the DO will handle role assignment when player connects
+      const response: JoinGameResponse = {
+        success: true,
+        role: 'O', // Player 2 will always be O in MVP
+        game: {
+          id: game.id,
+          status: 'waiting', // Still waiting until both connect to DO
+          nextToMove: game.nextToMove,
+          moves: JSON.parse(game.moves),
+          X_identity: game.X_identity,
+          O_identity: null, // DO will set this
+          source: game.source
+        }
+      };
+
+      return Response.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid request';
+      return Response.json({ error: message }, { status: 400 });
+    }
+  }
+
+  // POST /api/games/:id/move - Submit move with optional bot response
   if (path.match(/^\/api\/games\/[\w-]+\/move$/) && request.method === 'POST') {
     try {
       const gameId = path.split('/')[3];
@@ -115,31 +203,81 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
         return new Response('Not found', { status: 404 });
       }
 
-      const moves: number[] = JSON.parse(game.moves);
-      const state = getStateFromHistory(moves);
+      let moves: number[] = JSON.parse(game.moves);
+      let state = getStateFromHistory(moves);
 
       if (!isLegalMove(state, board, cell)) {
         return Response.json({ error: 'Illegal move' }, { status: 400 });
       }
 
-      const newMoves = [...moves, board, cell];
-      const newState = getStateFromHistory(newMoves);
-      const gameResult = checkGameWin(newState);
+      // Apply player move
+      moves = [...moves, board, cell];
+      state = getStateFromHistory(moves);
+      let gameResult = checkGameWin(state);
 
+      // If game is over, save and return
+      if (gameResult) {
+        await env.DB.prepare(`
+          UPDATE games SET moves = ?, status = ?, nextToMove = ?, end_reason = ?, ended_at = CURRENT_TIMESTAMP WHERE id = ?
+        `).bind(
+          JSON.stringify(moves),
+          gameResult,
+          state.nextToMove,
+          'complete',
+          gameId
+        ).run();
+
+        const response: SubmitMoveResponse = {
+          status: gameResult,
+          nextToMove: state.nextToMove,
+          moves,
+          legalMoves: []
+        };
+        return Response.json(response);
+      }
+
+      // Check if playing against a bot
+      const isBotGame = game.O_identity && game.O_identity.startsWith('bot-');
+      let botMove = null;
+
+      if (isBotGame && state.nextToMove === 'O') {
+        // Get bot difficulty
+        const botDifficulty = game.O_identity.split('-')[1] || 'random';
+
+        // Calculate bot move based on difficulty
+        if (botDifficulty === 'hard') {
+          botMove = botHard(state);
+        } else if (botDifficulty === 'medium') {
+          botMove = botMedium(state);
+        } else {
+          botMove = botEasy(state);
+        }
+
+        if (botMove) {
+          // Apply bot move
+          moves = [...moves, botMove.board, botMove.cell];
+          state = getStateFromHistory(moves);
+          gameResult = checkGameWin(state);
+        }
+      }
+
+      // Save game state
       await env.DB.prepare(`
-        UPDATE games SET moves = ?, status = ?, nextToMove = ? WHERE id = ?
+        UPDATE games SET moves = ?, status = ?, nextToMove = ?${gameResult ? ', end_reason = ?, ended_at = CURRENT_TIMESTAMP' : ''} WHERE id = ?
       `).bind(
-        JSON.stringify(newMoves),
+        JSON.stringify(moves),
         gameResult || 'incomplete',
-        newState.nextToMove,
+        state.nextToMove,
+        ...(gameResult ? ['complete'] : []),
         gameId
       ).run();
 
       const response: SubmitMoveResponse = {
         status: gameResult || 'incomplete',
-        nextToMove: newState.nextToMove,
-        moves: newMoves,
-        legalMoves: getLegalMoves(newState)
+        nextToMove: state.nextToMove,
+        moves,
+        legalMoves: gameResult ? [] : getLegalMoves(state),
+        botMove: botMove || undefined
       };
       return Response.json(response);
     } catch (error) {

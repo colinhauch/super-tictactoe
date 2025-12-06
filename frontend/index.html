@@ -11,6 +11,7 @@
     <header>
       <h1>Super Tic-Tac-Toe</h1>
       <div id="status">Initializing...</div>
+      <div id="connection-status" class="connection-status disconnected">⚪ Not connected</div>
     </header>
 
     <main>
@@ -20,13 +21,82 @@
 
       <aside id="game-controls">
         <button id="new-game-btn">New Game</button>
+
+        <!-- Join Game Section -->
+        <div class="join-game-section">
+          <label for="join-game-input">Or join a game:</label>
+          <div class="join-game-controls">
+            <input
+              type="text"
+              id="join-game-input"
+              placeholder="Enter Game ID"
+              autocomplete="off"
+            />
+            <button id="join-game-btn" class="btn-join">Join</button>
+          </div>
+        </div>
+
         <div id="game-info">
-          <p>Game ID: <span id="game-id">-</span></p>
+          <p>
+            Game ID:
+            <span id="game-id" class="game-id-display">-</span>
+            <button id="copy-game-id-btn" class="icon-btn" title="Copy game ID">📋</button>
+          </p>
+          <button id="copy-share-link-btn" class="share-btn">Copy Share Link</button>
           <p>Next to move: <span id="next-player">-</span></p>
           <p>Status: <span id="game-status">-</span></p>
         </div>
       </aside>
     </main>
+
+    <!-- New Game Modal -->
+    <div id="new-game-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>New Game</h2>
+          <button class="modal-close" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="game-type-selector">
+            <button class="game-type-btn" data-type="human">
+              <div class="game-type-icon">👥</div>
+              <h3>Play vs Human</h3>
+              <p>Create a private game</p>
+            </button>
+
+            <button class="game-type-btn" data-type="bot">
+              <div class="game-type-icon">🤖</div>
+              <h3>Play vs Bot</h3>
+              <p>Practice against AI</p>
+            </button>
+          </div>
+
+          <div id="bot-difficulty-selector" class="difficulty-selector hidden">
+            <h3>Select Difficulty</h3>
+            <div class="difficulty-options">
+              <button class="difficulty-btn" data-difficulty="easy">
+                <span>Easy</span>
+                <small>Random moves</small>
+              </button>
+              <button class="difficulty-btn" data-difficulty="medium">
+                <span>Medium</span>
+                <small>Smart tactics</small>
+              </button>
+              <button class="difficulty-btn" data-difficulty="hard">
+                <span>Hard</span>
+                <small>Minimax AI</small>
+              </button>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button id="confirm-new-game" class="btn-primary" disabled>Create Game</button>
+            <button id="cancel-new-game" class="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="/app.js"></script>
