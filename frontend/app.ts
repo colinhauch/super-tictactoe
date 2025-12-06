@@ -13,11 +13,17 @@ class SuperTicTacToe {
   private ws: WebSocket | null = null;
   private currentState: Game | null = null;
   private playerId: string;
+  private selectedGameType: 'bot' | 'human' | null = null;
+  private selectedDifficulty: 'easy' | 'medium' | 'hard' | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10; // Increased for testing
+  private reconnectDelay = 2000; // Start at 2 seconds for testing
 
   constructor() {
     this.playerId = this.getOrCreatePlayerId();
     this.initializeBoard();
     this.attachEventListeners();
+    this.handleUrlParams();
   }
 
   private getOrCreatePlayerId(): string {
@@ -63,20 +69,195 @@ class SuperTicTacToe {
     const newGameBtn = document.getElementById('new-game-btn');
     if (newGameBtn) {
       newGameBtn.addEventListener('click', () => {
-        this.createNewGame();
+        this.showNewGameModal();
+      });
+    }
+
+    const joinGameBtn = document.getElementById('join-game-btn');
+    const joinGameInput = document.getElementById('join-game-input') as HTMLInputElement;
+    if (joinGameBtn && joinGameInput) {
+      joinGameBtn.addEventListener('click', () => {
+        const gameId = joinGameInput.value.trim();
+        if (gameId) {
+          this.joinGameFromInput(gameId);
+          joinGameInput.value = '';
+        }
+      });
+
+      // Allow Enter key in input
+      joinGameInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          const gameId = joinGameInput.value.trim();
+          if (gameId) {
+            this.joinGameFromInput(gameId);
+            joinGameInput.value = '';
+          }
+        }
+      });
+    }
+
+    const copyGameIdBtn = document.getElementById('copy-game-id-btn');
+    if (copyGameIdBtn) {
+      copyGameIdBtn.addEventListener('click', () => {
+        this.copyGameId();
+      });
+    }
+
+    const copyShareLinkBtn = document.getElementById('copy-share-link-btn');
+    if (copyShareLinkBtn) {
+      copyShareLinkBtn.addEventListener('click', () => {
+        this.copyShareLink();
       });
     }
   }
 
-  private async createNewGame(): Promise<void> {
+  private async joinGameFromInput(gameId: string): Promise<void> {
+    try {
+      // Load game info first
+      const response = await fetch(`/api/games/${gameId}`);
+      if (!response.ok) {
+        alert('Game not found');
+        return;
+      }
+
+      const game = await response.json();
+
+      if (game.status === 'waiting') {
+        // Game is waiting - join it
+        await this.joinGame(gameId);
+      } else if (game.status === 'active' || game.status === 'incomplete') {
+        // Game is active - just spectate/view
+        this.gameId = gameId;
+        this.connectWebSocket(gameId);
+        this.updateStatus('Viewing game in progress');
+      } else {
+        // Game ended
+        this.gameId = gameId;
+        this.connectWebSocket(gameId);
+        this.updateStatus('This game has ended');
+      }
+    } catch (error) {
+      console.error('Error joining game:', error);
+      alert('Error joining game');
+    }
+  }
+
+  // Modal Methods
+  private showNewGameModal(): void {
+    const modal = document.getElementById('new-game-modal');
+    modal?.classList.remove('hidden');
+    this.attachModalListeners();
+  }
+
+  private hideNewGameModal(): void {
+    const modal = document.getElementById('new-game-modal');
+    modal?.classList.add('hidden');
+
+    // Reset selections
+    this.selectedGameType = null;
+    this.selectedDifficulty = null;
+
+    // Reset UI
+    document.querySelectorAll('.game-type-btn').forEach(btn => btn.classList.remove('selected'));
+    document.querySelectorAll('.difficulty-btn').forEach(btn => btn.classList.remove('selected'));
+    const difficultySelector = document.getElementById('bot-difficulty-selector');
+    difficultySelector?.classList.add('hidden');
+  }
+
+  private attachModalListeners(): void {
+    // Close button
+    const closeBtn = document.querySelector('.modal-close');
+    closeBtn?.addEventListener('click', () => this.hideNewGameModal());
+
+    // Cancel button
+    const cancelBtn = document.getElementById('cancel-new-game');
+    cancelBtn?.addEventListener('click', () => this.hideNewGameModal());
+
+    // Game type buttons
+    document.querySelectorAll('.game-type-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const type = (e.currentTarget as HTMLElement).dataset.type as 'bot' | 'human';
+        this.handleGameTypeSelect(type);
+      });
+    });
+
+    // Difficulty buttons
+    document.querySelectorAll('.difficulty-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const difficulty = (e.currentTarget as HTMLElement).dataset.difficulty as 'easy' | 'medium' | 'hard';
+        this.handleDifficultySelect(difficulty);
+      });
+    });
+
+    // Confirm button
+    const confirmBtn = document.getElementById('confirm-new-game');
+    confirmBtn?.addEventListener('click', () => this.handleConfirmNewGame());
+  }
+
+  private handleGameTypeSelect(type: 'bot' | 'human'): void {
+    this.selectedGameType = type;
+
+    // Update UI
+    document.querySelectorAll('.game-type-btn').forEach(btn => {
+      btn.classList.toggle('selected', (btn as HTMLElement).dataset.type === type);
+    });
+
+    // Show/hide difficulty selector
+    const difficultySelector = document.getElementById('bot-difficulty-selector');
+    if (type === 'bot') {
+      difficultySelector?.classList.remove('hidden');
+    } else {
+      difficultySelector?.classList.add('hidden');
+      this.selectedDifficulty = null;
+      document.querySelectorAll('.difficulty-btn').forEach(btn => btn.classList.remove('selected'));
+    }
+
+    this.updateConfirmButton();
+  }
+
+  private handleDifficultySelect(difficulty: 'easy' | 'medium' | 'hard'): void {
+    this.selectedDifficulty = difficulty;
+
+    // Update UI
+    document.querySelectorAll('.difficulty-btn').forEach(btn => {
+      btn.classList.toggle('selected', (btn as HTMLElement).dataset.difficulty === difficulty);
+    });
+
+    this.updateConfirmButton();
+  }
+
+  private updateConfirmButton(): void {
+    const confirmBtn = document.getElementById('confirm-new-game') as HTMLButtonElement;
+    if (!confirmBtn) return;
+
+    const canConfirm = this.selectedGameType === 'human' ||
+                       (this.selectedGameType === 'bot' && this.selectedDifficulty !== null);
+
+    confirmBtn.disabled = !canConfirm;
+  }
+
+  private async handleConfirmNewGame(): Promise<void> {
+    if (this.selectedGameType === 'bot' && this.selectedDifficulty) {
+      await this.createBotGame(this.selectedDifficulty);
+    } else if (this.selectedGameType === 'human') {
+      await this.createHumanGame();
+    }
+
+    this.hideNewGameModal();
+  }
+
+  // Game Creation Methods
+  private async createBotGame(difficulty: 'easy' | 'medium' | 'hard'): Promise<void> {
     try {
       const response = await fetch('/api/games', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           X_identity: this.playerId,
-          O_identity: 'bot-random',
-          source: 'websocket'
+          O_identity: `bot-${difficulty}`,
+          source: 'websocket',
+          gameType: 'bot',
+          botDifficulty: difficulty
         })
       });
 
@@ -84,9 +265,98 @@ class SuperTicTacToe {
       this.gameId = game.id;
       this.connectWebSocket(game.id);
       this.updateGameInfo(game);
+      this.updateStatus('Playing against bot - Your turn!');
     } catch (error) {
-      console.error('Failed to create game:', error);
+      console.error('Failed to create bot game:', error);
       this.updateStatus('Error creating game');
+    }
+  }
+
+  private async createHumanGame(): Promise<void> {
+    try {
+      const response = await fetch('/api/games', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          X_identity: this.playerId,
+          O_identity: null,
+          source: 'websocket',
+          gameType: 'human'
+        })
+      });
+
+      const game: Game = await response.json();
+      this.gameId = game.id;
+      this.connectWebSocket(game.id);
+      this.updateGameInfo(game);
+      this.updateStatus('Waiting for opponent to join...');
+
+      // Show share link prominently
+      alert(`Share this link with your opponent:\n\n${window.location.origin}?gameId=${game.id}`);
+    } catch (error) {
+      console.error('Failed to create human game:', error);
+      this.updateStatus('Error creating game');
+    }
+  }
+
+  private async joinGame(gameId: string): Promise<void> {
+    try {
+      const response = await fetch(`/api/games/${gameId}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ player_identity: this.playerId })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(`Cannot join game: ${error.error}`);
+        return;
+      }
+
+      const result = await response.json();
+
+      this.gameId = gameId;
+      this.connectWebSocket(gameId);
+      this.updateStatus(`You joined as player ${result.role}! Game starting...`);
+
+    } catch (error) {
+      console.error('Failed to join game:', error);
+      alert('Error joining game');
+    }
+  }
+
+  private async handleUrlParams(): Promise<void> {
+    const params = new URLSearchParams(window.location.search);
+    const gameId = params.get('gameId');
+
+    if (!gameId) return;
+
+    try {
+      // Load game info
+      const response = await fetch(`/api/games/${gameId}`);
+      if (!response.ok) {
+        alert('Game not found');
+        return;
+      }
+
+      const game = await response.json();
+
+      if (game.status === 'waiting') {
+        const shouldJoin = confirm(
+          `Join game ${gameId}?\n\nYou will be randomly assigned as X or O.`
+        );
+        if (shouldJoin) {
+          await this.joinGame(gameId);
+        }
+      } else {
+        // Game already active or ended - just spectate for now
+        alert('This game is already in progress or has ended.');
+      }
+
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } catch (error) {
+      console.error('Error handling URL params:', error);
     }
   }
 
@@ -96,13 +366,17 @@ class SuperTicTacToe {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/games/${gameId}/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/api/games/${gameId}/ws?identity=${this.playerId}`;
 
+    console.log('[WS] Connecting to:', wsUrl);
+    this.updateConnectionStatus('connecting');
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
-      this.updateStatus('Connected');
+      console.log('[WS] Connected');
+      this.reconnectAttempts = 0;
+      this.reconnectDelay = 2000; // Reset to initial delay
+      this.updateConnectionStatus('connected');
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -111,23 +385,56 @@ class SuperTicTacToe {
         if (data.type === 'state') {
           this.handleStateUpdate(data.game);
         } else if (data.type === 'error') {
-          console.error('Server error:', data.message);
+          console.error('[WS] Server error:', data.message);
+          // Don't reconnect on game logic errors
           this.updateStatus(`Error: ${data.message}`);
         }
       } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+        console.error('[WS] Failed to parse message:', error);
       }
     };
 
     this.ws.onerror = (error: Event) => {
-      console.error('WebSocket error:', error);
-      this.updateStatus('Connection error');
+      console.error('[WS] Error:', error);
+      this.updateConnectionStatus('error');
     };
 
-    this.ws.onclose = () => {
-      console.log('WebSocket closed');
-      this.updateStatus('Disconnected');
+    this.ws.onclose = (event) => {
+      console.log('[WS] Closed:', event.code, event.reason);
+      this.updateConnectionStatus('disconnected');
+
+      // Attempt reconnection if not a clean close and we haven't exceeded max attempts
+      if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts && this.gameId) {
+        this.reconnectAttempts++;
+        console.log(`[WS] Reconnecting in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+
+        setTimeout(() => {
+          if (this.gameId) {
+            this.connectWebSocket(this.gameId);
+          }
+        }, this.reconnectDelay);
+
+        // Exponential backoff (cap at 30 seconds for testing)
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+      } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        this.updateStatus('Failed to reconnect. Refresh the page to try again.');
+      }
     };
+  }
+
+  private updateConnectionStatus(status: 'connecting' | 'connected' | 'disconnected' | 'error'): void {
+    const statusEl = document.getElementById('connection-status');
+    if (!statusEl) return;
+
+    const statusText: Record<typeof status, string> = {
+      connecting: '🟡 Connecting...',
+      connected: '🟢 Connected',
+      disconnected: '🔴 Disconnected',
+      error: '🔴 Connection Error'
+    };
+
+    statusEl.textContent = statusText[status];
+    statusEl.className = `connection-status ${status}`;
   }
 
   private handleStateUpdate(game: Game): void {
@@ -135,7 +442,8 @@ class SuperTicTacToe {
     this.renderBoard(game.moves);
     this.updateGameInfo(game);
 
-    if (game.status !== 'incomplete') {
+    const isGameOver = game.status !== 'incomplete' && game.status !== 'active' && game.status !== 'waiting';
+    if (isGameOver) {
       this.updateStatus(
         `Game Over: ${game.status === 'draw' ? 'Draw!' : game.status + ' wins!'}`
       );
@@ -203,7 +511,8 @@ class SuperTicTacToe {
     }
 
     // Highlight legal moves and active boards
-    if (this.currentState && this.currentState.status === 'incomplete') {
+    const isPlayable = this.currentState && (this.currentState.status === 'incomplete' || this.currentState.status === 'active');
+    if (isPlayable) {
       this.highlightLegalMoves(state);
     }
   }
@@ -272,7 +581,8 @@ class SuperTicTacToe {
       return;
     }
 
-    if (!this.currentState || this.currentState.status !== 'incomplete') {
+    const isPlayable = this.currentState && (this.currentState.status === 'incomplete' || this.currentState.status === 'active');
+    if (!isPlayable) {
       this.updateStatus('Game is over');
       return;
     }
@@ -300,9 +610,34 @@ class SuperTicTacToe {
     const nextPlayerEl = document.getElementById('next-player');
     const gameStatusEl = document.getElementById('game-status');
 
-    if (gameIdEl) gameIdEl.textContent = game.id.slice(0, 8);
+    if (gameIdEl) gameIdEl.textContent = game.id;
     if (nextPlayerEl) nextPlayerEl.textContent = game.nextToMove;
     if (gameStatusEl) gameStatusEl.textContent = game.status;
+  }
+
+  private copyGameId(): void {
+    if (!this.gameId) return;
+    navigator.clipboard.writeText(this.gameId).then(() => {
+      this.updateStatus('Game ID copied to clipboard!');
+      setTimeout(() => {
+        this.updateStatus('Ready to play');
+      }, 2000);
+    }).catch(() => {
+      this.updateStatus('Failed to copy game ID');
+    });
+  }
+
+  private copyShareLink(): void {
+    if (!this.gameId) return;
+    const shareUrl = `${window.location.origin}?gameId=${this.gameId}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      this.updateStatus('Share link copied to clipboard!');
+      setTimeout(() => {
+        this.updateStatus('Ready to play');
+      }, 2000);
+    }).catch(() => {
+      this.updateStatus('Failed to copy share link');
+    });
   }
 
   private updateStatus(message: string): void {
